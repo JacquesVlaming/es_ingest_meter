@@ -11,13 +11,15 @@ Usage:
 
 import argparse
 import json
+import math
 import random
 import string
 import subprocess
 import sys
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from typing import Iterator
 
 try:
     import requests
@@ -67,6 +69,8 @@ Examples:
                    help="Documents per bulk request (default: 500)")
     p.add_argument("--index", default=None,
                    help="Target index name (default: es-ingest-meter-test-YYYY.MM.DD)")
+    p.add_argument("--parallel", type=int, default=1, metavar="N",
+                   help="Number of concurrent bulk indexing threads (default: 1)")
     p.add_argument("--no-verify", action="store_true",
                    help="Skip re-running es_ingest_meter.py after ingestion")
     p.add_argument("--keep", action="store_true",
@@ -201,39 +205,67 @@ def human_bytes(n: float) -> str:
 # Main ingestion logic
 # ---------------------------------------------------------------------------
 
-def ingest(client: ESClient, index: str, total_docs: int, doc_bytes: int, batch_size: int) -> dict:
-    sent_docs  = 0
-    sent_bytes = 0
-    errors     = 0
-    t_start    = time.time()
+def ingest(client: ESClient, index: str, total_docs: int, doc_bytes: int,
+           batch_size: int, workers: int = 1) -> dict:
 
-    print(f"\n  Target : {total_docs:,} docs × ~{human_bytes(doc_bytes)} = "
+    print(f"\n  Target  : {total_docs:,} docs × ~{human_bytes(doc_bytes)} = "
           f"~{human_bytes(total_docs * doc_bytes)} uncompressed")
-    print(f"  Index  : {index}")
-    print(f"  Batch  : {batch_size} docs/request\n")
+    print(f"  Index   : {index}")
+    print(f"  Batch   : {batch_size} docs/request")
+    print(f"  Threads : {workers}\n")
 
-    while sent_docs < total_docs:
-        batch_count = min(batch_size, total_docs - sent_docs)
-        docs        = [make_document(doc_bytes) for _ in range(batch_count)]
-        body        = bulk_body(docs, index)
-        body_bytes  = len(body.encode())
+    # Shared state
+    lock         = threading.Lock()
+    docs_remaining = total_docs
+    sent_docs    = 0
+    sent_bytes   = 0
+    errors       = 0
+    t_start      = time.time()
 
-        resp = client.post("/_bulk", body)
-        if resp.get("errors"):
-            errors += sum(
-                1 for item in resp["items"]
-                if item.get("index", {}).get("error")
-            )
+    def worker() -> None:
+        nonlocal docs_remaining, sent_docs, sent_bytes, errors
+        while True:
+            with lock:
+                if docs_remaining <= 0:
+                    return
+                count = min(batch_size, docs_remaining)
+                docs_remaining -= count
 
-        sent_docs  += batch_count
-        sent_bytes += body_bytes
+            docs = [make_document(doc_bytes) for _ in range(count)]
+            body = bulk_body(docs, index)
+            body_bytes = len(body.encode())
 
-        elapsed = time.time() - t_start
-        rate    = sent_bytes / elapsed if elapsed > 0 else 0
-        print(f"\r  {progress_bar(sent_docs, total_docs)}  "
-              f"{sent_docs:>7,}/{total_docs:,} docs  "
-              f"{human_bytes(sent_bytes):>10} sent  "
-              f"{human_bytes(rate)}/s  ", end="", flush=True)
+            resp = client.post("/_bulk", body)
+            bulk_errors = 0
+            if resp.get("errors"):
+                bulk_errors = sum(
+                    1 for item in resp["items"]
+                    if item.get("index", {}).get("error")
+                )
+
+            with lock:
+                sent_docs  += count
+                sent_bytes += body_bytes
+                errors     += bulk_errors
+
+    # Launch workers and print progress from main thread
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = [executor.submit(worker) for _ in range(workers)]
+
+        while any(not f.done() for f in futures):
+            with lock:
+                d, b = sent_docs, sent_bytes
+            elapsed = time.time() - t_start
+            rate    = b / elapsed if elapsed > 0 else 0
+            print(f"\r  {progress_bar(d, total_docs)}  "
+                  f"{d:>7,}/{total_docs:,} docs  "
+                  f"{human_bytes(b):>10} sent  "
+                  f"{human_bytes(rate)}/s  ", end="", flush=True)
+            time.sleep(0.3)
+
+        # Raise any worker exceptions
+        for f in futures:
+            f.result()
 
     elapsed = time.time() - t_start
     print()  # newline after progress bar
@@ -307,7 +339,7 @@ def main() -> None:
 
     # Ingest
     try:
-        result = ingest(client, index, total_docs, doc_bytes, args.batch_size)
+        result = ingest(client, index, total_docs, doc_bytes, args.batch_size, args.parallel)
     except Exception as e:
         log.error("Generator run failed during ingest", extra={"index": index, "error": str(e)})
         raise

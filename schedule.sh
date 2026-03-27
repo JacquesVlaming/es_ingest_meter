@@ -19,6 +19,7 @@ run() {
         --target-mb   "${TARGET_MB:-10}"            \
         --doc-size-kb "${DOC_SIZE_KB:-1}"           \
         --batch-size  "${BATCH_SIZE:-500}"          \
+        --parallel    "${PARALLEL:-1}"              \
         ${KEEP_INDEX:+--keep}                       \
         ${INSECURE:+--insecure}
     echo "<<< $(date -u '+%Y-%m-%dT%H:%M:%SZ') — run complete, sleeping ${INTERVAL}h"
