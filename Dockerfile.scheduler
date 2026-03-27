@@ -1,0 +1,11 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY es_data_gen.py es_ingest_meter.py es_logger.py schedule.sh .
+RUN chmod +x schedule.sh
+
+ENTRYPOINT ["/app/schedule.sh"]
