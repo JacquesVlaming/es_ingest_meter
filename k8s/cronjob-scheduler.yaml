@@ -1,0 +1,73 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: es-ingest-scheduler
+  namespace: es-tools
+spec:
+  schedule: "0 2 * * *"          # 02:00 UTC daily
+  timeZone: "UTC"
+  concurrencyPolicy: Forbid       # skip run if previous hasn't finished
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: scheduler
+              image: us-central1-docker.pkg.dev/YOUR_PROJECT_ID/es-ingest/es-ingest-scheduler:latest
+              command: ["python", "es_data_gen.py"]   # bypass schedule.sh — k8s owns the schedule
+              args:
+                - "--host"
+                - "$(ES_HOST)"
+                - "--api-key"
+                - "$(ES_API_KEY)"
+                - "--target-mb"
+                - "$(TARGET_MB)"
+                - "--doc-size-kb"
+                - "$(DOC_SIZE_KB)"
+                - "--batch-size"
+                - "$(BATCH_SIZE)"
+                - "--parallel"
+                - "$(PARALLEL)"
+                - "--keep"        # always retain index so the meter can read it
+              resources:
+                requests:
+                  cpu: "200m"
+                  memory: "256Mi"
+                limits:
+                  cpu: "1000m"
+                  memory: "512Mi"
+              env:
+                - name: ES_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: es-credentials
+                      key: ES_HOST
+                - name: ES_API_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: es-credentials
+                      key: ES_API_KEY
+                - name: TARGET_MB
+                  valueFrom:
+                    configMapKeyRef:
+                      name: es-ingest-config
+                      key: TARGET_MB
+                - name: DOC_SIZE_KB
+                  valueFrom:
+                    configMapKeyRef:
+                      name: es-ingest-config
+                      key: DOC_SIZE_KB
+                - name: BATCH_SIZE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: es-ingest-config
+                      key: BATCH_SIZE
+                - name: PARALLEL
+                  valueFrom:
+                    configMapKeyRef:
+                      name: es-ingest-config
+                      key: PARALLEL

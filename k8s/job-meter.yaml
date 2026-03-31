@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: es-ingest-meter
+  namespace: es-tools
+spec:
+  backoffLimit: 0                  # one-shot — don't retry, fix the error
+  ttlSecondsAfterFinished: 600     # auto-delete pod/job after 10 min
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: meter
+          image: us-central1-docker.pkg.dev/YOUR_PROJECT_ID/es-ingest/es-ingest-meter:latest
+          args:
+            - "--host"
+            - "$(ES_HOST)"
+            - "--api-key"
+            - "$(ES_API_KEY)"
+            - "--days"
+            - "30"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+          env:
+            - name: ES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: es-credentials
+                  key: ES_HOST
+            - name: ES_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: es-credentials
+                  key: ES_API_KEY
