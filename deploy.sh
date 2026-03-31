@@ -23,10 +23,10 @@ gcloud auth configure-docker "${REGION}-docker.pkg.dev" --quiet
 
 # ── Build images ───────────────────────────────────────────────────────────────
 echo "==> Building es-ingest-meter..."
-docker build -f Dockerfile.meter -t "${METER_IMAGE}" .
+docker buildx build --platform linux/amd64 -f Dockerfile.meter -t "${METER_IMAGE}" --push .
 
 echo "==> Building es-ingest-scheduler..."
-docker build -f Dockerfile.scheduler -t "${SCHEDULER_IMAGE}" .
+docker buildx build --platform linux/amd64 -f Dockerfile.scheduler -t "${SCHEDULER_IMAGE}" --push .
 
 # ── Push images ────────────────────────────────────────────────────────────────
 echo "==> Pushing images..."
