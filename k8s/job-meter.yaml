@@ -11,7 +11,7 @@ spec:
       restartPolicy: Never
       containers:
         - name: meter
-          image: us-central1-docker.pkg.dev/YOUR_PROJECT_ID/es-ingest/es-ingest-meter:latest
+          image: us-central1-docker.pkg.dev/elastic-sa/es-ingest/es-ingest-meter:latest
           args:
             - "--host"
             - "$(ES_HOST)"

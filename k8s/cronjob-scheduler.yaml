@@ -17,7 +17,7 @@ spec:
           restartPolicy: OnFailure
           containers:
             - name: scheduler
-              image: us-central1-docker.pkg.dev/YOUR_PROJECT_ID/es-ingest/es-ingest-scheduler:latest
+              image: us-central1-docker.pkg.dev/elastic-sa/es-ingest/es-ingest-scheduler:latest
               command: ["python", "es_data_gen.py"]   # bypass schedule.sh — k8s owns the schedule
               args:
                 - "--host"
