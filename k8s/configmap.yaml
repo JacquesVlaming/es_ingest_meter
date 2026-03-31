@@ -4,7 +4,7 @@ metadata:
   name: es-ingest-config
   namespace: es-tools
 data:
-  TARGET_MB: "10"
+  TARGET_MB: "102400"  # 100 GB
   DOC_SIZE_KB: "1"
   BATCH_SIZE: "500"
   PARALLEL: "1"
