@@ -4,8 +4,7 @@ set -euo pipefail
 # ── Configuration ──────────────────────────────────────────────────────────────
 PROJECT_ID="${GCP_PROJECT_ID:?Please export GCP_PROJECT_ID=your-project-id}"
 REGION="us-central1"
-ZONE="us-central1-c"
-CLUSTER="es-tools"
+CLUSTER="jacques-vlaming-cluster"
 REPO="es-ingest"
 NAMESPACE="es-tools"
 REGISTRY="${REGION}-docker.pkg.dev/${PROJECT_ID}/${REPO}"
@@ -41,7 +40,7 @@ rm -f k8s/cronjob-scheduler.yaml.bak k8s/job-meter.yaml.bak
 
 # ── Get GKE credentials ────────────────────────────────────────────────────────
 echo "==> Fetching GKE credentials..."
-gcloud container clusters get-credentials "${CLUSTER}" --zone="${ZONE}" --project="${PROJECT_ID}"
+gcloud container clusters get-credentials "${CLUSTER}" --region="${REGION}" --project="${PROJECT_ID}"
 
 # ── Create namespace ───────────────────────────────────────────────────────────
 kubectl get namespace "${NAMESPACE}" &>/dev/null || kubectl create namespace "${NAMESPACE}"
