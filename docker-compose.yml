@@ -6,15 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile.meter
     image: es-ingest-meter
-    environment:
-      ES_HOST:     ${ES_HOST}
-      ES_API_KEY:  ${ES_API_KEY:-}
-      ES_USERNAME: ${ES_USERNAME:-}
-      ES_PASSWORD: ${ES_PASSWORD:-}
-    command: >
-      --host ${ES_HOST}
-      ${ES_API_KEY:+--api-key} ${ES_API_KEY:-}
-      --days ${DAYS:-30}
+    env_file: .env
 
   # One-shot: inventory data sources, ILM policies, and daily ingest rates
   ilm-inventory:
@@ -22,17 +14,9 @@ services:
       context: .
       dockerfile: Dockerfile.inventory
     image: es-ilm-inventory
-    environment:
-      ES_HOST:     ${ES_HOST}
-      ES_API_KEY:  ${ES_API_KEY:-}
-      ES_USERNAME: ${ES_USERNAME:-}
-      ES_PASSWORD: ${ES_PASSWORD:-}
+    env_file: .env
     volumes:
       - ./output:/output
-    command: >
-      --host ${ES_HOST}
-      ${ES_API_KEY:+--api-key} ${ES_API_KEY:-}
-      --days ${DAYS:-30}
 
   # Scheduled: ingest synthetic data every 24h
   ingest-scheduler:
@@ -41,14 +25,4 @@ services:
       dockerfile: Dockerfile.scheduler
     image: es-ingest-scheduler
     restart: unless-stopped
-    environment:
-      ES_HOST:        ${ES_HOST}
-      ES_API_KEY:     ${ES_API_KEY:-}
-      ES_USERNAME:    ${ES_USERNAME:-}
-      ES_PASSWORD:    ${ES_PASSWORD:-}
-      TARGET_MB:      ${TARGET_MB:-10}
-      DOC_SIZE_KB:    ${DOC_SIZE_KB:-1}
-      BATCH_SIZE:     ${BATCH_SIZE:-500}
-      INTERVAL_HOURS: ${INTERVAL_HOURS:-24}
-      PARALLEL:       ${PARALLEL:-1}
-      KEEP_INDEX:     ${KEEP_INDEX:-}
+    env_file: .env

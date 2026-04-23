@@ -5,6 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY es_ilm_inventory.py .
+COPY es_ilm_inventory.py run_inventory.sh .
+RUN chmod +x run_inventory.sh
 
-ENTRYPOINT ["python", "es_ilm_inventory.py"]
+ENTRYPOINT ["/app/run_inventory.sh"]

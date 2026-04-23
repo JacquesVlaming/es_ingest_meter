@@ -5,6 +5,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY es_ingest_meter.py es_logger.py .
+COPY es_ingest_meter.py es_logger.py run_meter.sh .
+RUN chmod +x run_meter.sh
 
-ENTRYPOINT ["python", "es_ingest_meter.py"]
+ENTRYPOINT ["/app/run_meter.sh"]
