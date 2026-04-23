@@ -7,6 +7,7 @@ A toolset for accurately measuring daily data ingest volume on an Elasticsearch 
 | Tool | Description |
 |---|---|
 | `es_ingest_meter.py` | Reads `_stats` from all (or filtered) indices, groups by date, and computes rolling average daily ingest with storage projections |
+| `es_ilm_inventory.py` | Inventories all data sources (data streams and index families) with their ILM policy, tier phase ages, avg daily ingest, and current storage — designed for capacity planning |
 | `es_data_gen.py` | Ingests a configurable volume of synthetic data to cross-validate what the meter reports |
 | `es_logger.py` | Shared ECS logging handler — ships structured run events to an `es-ingest-meter-logs-*` index |
 
@@ -54,6 +55,71 @@ python es_data_gen.py \
   --api-key your-base64-api-key \
   --target-mb 50
 ```
+
+### ILM inventory (capacity planning)
+
+```bash
+python es_ilm_inventory.py \
+  --host https://your-cluster.es.io:443 \
+  --api-key your-base64-api-key
+```
+
+Export to CSV for spreadsheet analysis:
+
+```bash
+python es_ilm_inventory.py \
+  --host https://your-cluster.es.io:443 \
+  --api-key your-base64-api-key \
+  --csv inventory.csv
+```
+
+#### Required API key privileges
+
+```json
+POST /_security/api_key
+{
+  "name": "es-ilm-inventory-ro",
+  "role_descriptors": {
+    "ilm_inventory_reader": {
+      "cluster": ["monitor", "read_ilm"],
+      "indices": [
+        {
+          "names": ["*"],
+          "privileges": ["monitor", "view_index_metadata", "read"]
+        }
+      ]
+    }
+  }
+}
+```
+
+`read_ilm` is required to fetch policy phase definitions (rollover, warm/cold/frozen/delete ages). Without it the tool still runs — policy names are discovered via index settings — but phase columns will be blank with an explanatory note.
+
+#### Output
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  Elasticsearch ILM Inventory                                 ║
+╠══════════════════════════════════════════════════════════════╣
+║  Cluster : my-cluster                                        ║
+║  Version : 9.3.2                                             ║
+║  Sources : 42                                                ║
+║  Avg/day : 30-day rolling window                             ║
+╚══════════════════════════════════════════════════════════════╝
+
+  Data Source                    Type         ILM Policy       Rollover    Warm  Cold  Frozen  Delete  Idx    Avg/day  _size/day   Primary
+  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  logs-nginx.access-default      Data Stream  logs             50gb / 30d    —     —       —       —     1   342 MB/d         —    2.67 GB
+  metrics-system.cpu-default     Data Stream  metrics@lifec…   50gb / 30d    —     —       —       —     1   292 KB/d         —    4.85 MB
+  my-app-logs                    Index (ILM)  custom-policy    50gb / 30d    —     —    1d SS     90d    3    12 MB/d    9 MB/d   98.4 MB
+  old-index                      Index (unmanaged)  —          —             —     —       —       —     1         —         —   512.0 MB
+```
+
+Columns:
+- **Avg/day** — store estimate: average daily primary bytes over the rolling window
+- **_size/day** — raw source bytes via mapper-size plugin (only populated when `_size` mapping is enabled)
+- **Frozen SS** — `1d SS` means the frozen phase uses searchable snapshots, not live node storage
+- **Primary** — current total primary storage across all backing indices
 
 ## Docker
 
