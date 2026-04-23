@@ -59,18 +59,13 @@ python es_data_gen.py \
 ### ILM inventory (capacity planning)
 
 ```bash
-python es_ilm_inventory.py \
-  --host https://your-cluster.es.io:443 \
-  --api-key your-base64-api-key
+docker compose run --rm ilm-inventory
 ```
 
-Export to CSV for spreadsheet analysis:
+Export to CSV (written to `./output/inventory.csv` on the host):
 
 ```bash
-python es_ilm_inventory.py \
-  --host https://your-cluster.es.io:443 \
-  --api-key your-base64-api-key \
-  --csv inventory.csv
+docker compose run --rm ilm-inventory --csv /output/inventory.csv
 ```
 
 #### Required API key privileges

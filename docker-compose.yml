@@ -16,6 +16,24 @@ services:
       ${ES_API_KEY:+--api-key} ${ES_API_KEY:-}
       --days ${DAYS:-30}
 
+  # One-shot: inventory data sources, ILM policies, and daily ingest rates
+  ilm-inventory:
+    build:
+      context: .
+      dockerfile: Dockerfile.inventory
+    image: es-ilm-inventory
+    environment:
+      ES_HOST:     ${ES_HOST}
+      ES_API_KEY:  ${ES_API_KEY:-}
+      ES_USERNAME: ${ES_USERNAME:-}
+      ES_PASSWORD: ${ES_PASSWORD:-}
+    volumes:
+      - ./output:/output
+    command: >
+      --host ${ES_HOST}
+      ${ES_API_KEY:+--api-key} ${ES_API_KEY:-}
+      --days ${DAYS:-30}
+
   # Scheduled: ingest synthetic data every 24h
   ingest-scheduler:
     build:
