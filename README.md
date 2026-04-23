@@ -11,6 +11,63 @@ A toolset for accurately measuring daily data ingest volume on an Elasticsearch 
 | `es_data_gen.py` | Ingests a configurable volume of synthetic data to cross-validate what the meter reports |
 | `es_logger.py` | Shared ECS logging handler — ships structured run events to an `es-ingest-meter-logs-*` index |
 
+## Quickstart
+
+### 1. Configure
+
+Copy `.env.example` to `.env` and fill in your cluster details:
+
+```bash
+cp .env.example .env
+```
+
+| Variable | Default | Description |
+|---|---|---|
+| `ES_HOST` | — | Elasticsearch base URL |
+| `ES_API_KEY` | — | Base64-encoded API key |
+| `ES_USERNAME` | — | Basic auth username (alternative to API key) |
+| `ES_PASSWORD` | — | Basic auth password |
+| `DAYS` | `30` | Rolling window in days for ingest averages |
+| `TARGET_MB` | `10` | MB of synthetic data per scheduler run |
+| `DOC_SIZE_KB` | `1` | Approximate document size in KB |
+| `BATCH_SIZE` | `500` | Documents per bulk request |
+| `INTERVAL_HOURS` | `24` | Hours between scheduler runs |
+| `KEEP_INDEX` | — | Set to `1` to retain test indices after each run |
+| `PARALLEL` | `1` | Number of concurrent bulk indexing threads |
+
+### 2. Build
+
+```bash
+docker compose build
+```
+
+### 3. Run
+
+**Measure ingest:**
+
+```bash
+docker compose run --rm meter
+```
+
+**ILM inventory (data sources + policies + daily ingest):**
+
+```bash
+docker compose run --rm ilm-inventory
+```
+
+**Export inventory to CSV** (written to `./output/inventory.csv` on the host):
+
+```bash
+docker compose run --rm ilm-inventory --csv /output/inventory.csv
+```
+
+**Run the synthetic data scheduler (24h loop):**
+
+```bash
+docker compose up -d ingest-scheduler
+docker compose logs -f ingest-scheduler
+```
+
 ## How it works
 
 The meter reads `primaries.store.size_in_bytes` and `docs.count` from the `_stats` API to compute an average document size per index. It then runs a `date_histogram` aggregation on the timestamp field to get the actual document count per day, and multiplies by the average doc size to estimate daily storage — regardless of whether the index name contains a date.
@@ -28,54 +85,16 @@ The current day will always show partial data.
 - **Today's data is partial**: The current day's row reflects ingest so far, not a full day. Exclude today from averages when comparing full days.
 - **Replicas counted separately**: The `With Replicas` column includes all replica copies. The replica multiplier shown is observed from the cluster — adjust your sizing targets accordingly.
 
-## Quickstart
+## API key privileges
 
-### Prerequisites
-
-```bash
-pip install requests
-```
-
-Or use Docker (recommended).
-
-### Measure ingest
-
-```bash
-python es_ingest_meter.py \
-  --host https://your-cluster.es.io:443 \
-  --api-key your-base64-api-key \
-  --days 30
-```
-
-### Cross-validate with synthetic data
-
-```bash
-python es_data_gen.py \
-  --host https://your-cluster.es.io:443 \
-  --api-key your-base64-api-key \
-  --target-mb 50
-```
-
-### ILM inventory (capacity planning)
-
-```bash
-docker compose run --rm ilm-inventory
-```
-
-Export to CSV (written to `./output/inventory.csv` on the host):
-
-```bash
-docker compose run --rm ilm-inventory --csv /output/inventory.csv
-```
-
-#### Required API key privileges
+### Ingest meter
 
 ```json
 POST /_security/api_key
 {
-  "name": "es-ilm-inventory-ro",
+  "name": "es-ingest-meter-ro",
   "role_descriptors": {
-    "ilm_inventory_reader": {
+    "ingest_meter_reader": {
       "cluster": ["monitor", "read_ilm"],
       "indices": [
         {
@@ -88,87 +107,13 @@ POST /_security/api_key
 }
 ```
 
-`read_ilm` is required to fetch policy phase definitions (rollover, warm/cold/frozen/delete ages). Without it the tool still runs — policy names are discovered via index settings — but phase columns will be blank with an explanatory note.
+### ILM inventory
 
-#### Output
-
-```
-╔══════════════════════════════════════════════════════════════╗
-║  Elasticsearch ILM Inventory                                 ║
-╠══════════════════════════════════════════════════════════════╣
-║  Cluster : my-cluster                                        ║
-║  Version : 9.3.2                                             ║
-║  Sources : 42                                                ║
-║  Avg/day : 30-day rolling window                             ║
-╚══════════════════════════════════════════════════════════════╝
-
-  Data Source                    Type         ILM Policy       Rollover    Warm  Cold  Frozen  Delete  Idx    Avg/day  _size/day   Primary
-  ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  logs-nginx.access-default      Data Stream  logs             50gb / 30d    —     —       —       —     1   342 MB/d         —    2.67 GB
-  metrics-system.cpu-default     Data Stream  metrics@lifec…   50gb / 30d    —     —       —       —     1   292 KB/d         —    4.85 MB
-  my-app-logs                    Index (ILM)  custom-policy    50gb / 30d    —     —    1d SS     90d    3    12 MB/d    9 MB/d   98.4 MB
-  old-index                      Index (unmanaged)  —          —             —     —       —       —     1         —         —   512.0 MB
-```
-
-Columns:
-- **Avg/day** — store estimate: average daily primary bytes over the rolling window
-- **_size/day** — raw source bytes via mapper-size plugin (only populated when `_size` mapping is enabled)
-- **Frozen SS** — `1d SS` means the frozen phase uses searchable snapshots, not live node storage
-- **Primary** — current total primary storage across all backing indices
-
-## Docker
-
-Two separate images — one for each tool.
-
-### Build
-
-```bash
-docker compose build
-```
-
-### Configure
-
-Copy `.env.example` to `.env` and fill in your cluster details:
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Default | Description |
-|---|---|---|
-| `ES_HOST` | — | Elasticsearch base URL |
-| `ES_API_KEY` | — | Base64-encoded API key |
-| `ES_USERNAME` | — | Basic auth username (alternative to API key) |
-| `ES_PASSWORD` | — | Basic auth password |
-| `TARGET_MB` | `10` | MB of synthetic data per scheduler run |
-| `DOC_SIZE_KB` | `1` | Approximate document size in KB |
-| `BATCH_SIZE` | `500` | Documents per bulk request |
-| `INTERVAL_HOURS` | `24` | Hours between scheduler runs |
-| `KEEP_INDEX` | — | Set to `1` to retain test indices after each run |
-| `PARALLEL` | `1` | Number of concurrent bulk indexing threads |
-
-### Run the meter (one-shot)
-
-```bash
-docker compose run --rm meter
-```
-
-### Run the scheduler (24h loop)
-
-```bash
-docker compose up -d ingest-scheduler
-docker compose logs -f ingest-scheduler
-```
-
-### Export to CSV
-
-```bash
-docker compose run --rm meter --csv /output/report.csv
-# or directly:
-python es_ingest_meter.py --host ... --api-key ... --csv report.csv
-```
+Same privileges as the meter. `read_ilm` is required to fetch policy phase definitions (rollover, warm/cold/frozen/delete ages). Without it the tool still runs — policy names are discovered via index settings — but phase columns will be blank with an explanatory note.
 
 ## Output
+
+### Ingest meter
 
 ```
 ╔══════════════════════════════════════════════════════════════╗
@@ -180,24 +125,51 @@ python es_ingest_meter.py --host ... --api-key ... --csv report.csv
 ║  Window  : 30 days requested, 14 days with data              ║
 ╚══════════════════════════════════════════════════════════════╝
 
-  Date               Primary   With Replicas       Documents  Relative
-  ────────────────────────────────────────────────────────────────────────
-  2026-03-14         1.20 GB         2.41 GB       2,100,000  ███████░░░░░░░░░░░
-  2026-03-15         1.85 GB         3.70 GB       3,240,000  ██████████████████
+  Date            Store Est.   _size (src)   % src   With Replicas       Documents  Relative
+  ─────────────────────────────────────────────────────────────────────────────────────────────────
+  2026-03-14        1.20 GB             —       —         2.41 GB       2,100,000  ████████░░░░░░░░
+  2026-03-15        1.85 GB       1.62 GB   87.6%         3.70 GB       3,240,000  ████████████████
   ...
 
   ┌─ Rolling Averages (14 days) ─────────────────────────────────────┐
-  │  Avg primary / day   : 1.52 GB                               │
-  │  Avg total / day     : 3.04 GB                               │
-  │  Avg documents / day : 2,670,000                             │
-  │  Observed replica ×  : 2.00x                                 │
-  ├─ Projections ────────────────────────────────────────────────────┤
-  │  30-day primary      : 44.60 GB                              │
-  │  30-day total        : 89.20 GB                              │
-  │  90-day primary      : 133.80 GB                             │
-  │  365-day primary     : 554.80 GB                             │
+  │  Avg store est. / day : 1.52 GB                              │
+  │  Avg _size / day      : 1.41 GB                              │
+  │  Avg total / day      : 3.04 GB                              │
+  │  Avg documents / day  : 2,670,000                            │
+  │  Observed replica ×   : 2.00x                                │
+  ├─ Projections (store estimate) ───────────────────────────────────┤
+  │  30-day primary       : 44.60 GB                             │
+  │  30-day total         : 89.20 GB                             │
+  │  90-day primary       : 133.80 GB                            │
+  │  365-day primary      : 554.80 GB                            │
   └──────────────────────────────────────────────────────────────────┘
 ```
+
+### ILM inventory
+
+```
+╔══════════════════════════════════════════════════════════════╗
+║  Elasticsearch ILM Inventory                                 ║
+╠══════════════════════════════════════════════════════════════╣
+║  Cluster : my-cluster                                        ║
+║  Version : 9.3.2                                             ║
+║  Sources : 42                                                ║
+║  Avg/day : 30-day rolling window                             ║
+╚══════════════════════════════════════════════════════════════╝
+
+  Data Source                    Type         ILM Policy     Rollover    Warm  Cold  Frozen  Delete  Idx    Avg/day  _size/day   Primary
+  ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  logs-nginx.access-default      Data Stream  logs           50gb / 30d    —     —       —       —     1   342 MB/d         —    2.67 GB
+  metrics-system.cpu-default     Data Stream  metrics@life…  50gb / 30d    —     —       —       —     1   292 KB/d         —    4.85 MB
+  my-app-logs                    Index (ILM)  custom-policy  50gb / 30d    —     —    1d SS     90d    3    12 MB/d    9 MB/d   98.4 MB
+  old-index                      Index (unmanaged)  —        —             —     —       —       —     1         —         —   512.0 MB
+```
+
+Columns:
+- **Avg/day** — store estimate: average daily primary bytes over the rolling window
+- **_size/day** — raw source bytes via mapper-size plugin (only when `_size` mapping is enabled)
+- **Frozen `SS`** — searchable snapshot phase; data lives in the snapshot repo, not on live nodes
+- **Primary** — current total primary storage across all backing indices
 
 ## Runtime logs in Elasticsearch
 
@@ -209,12 +181,3 @@ Example events:
 { "message": "Meter run completed", "labels": { "avg_primary_bytes_per_day": 1632428032, "avg_docs_per_day": 2670000, "projected_30d_primary_bytes": 48972840960 } }
 { "message": "Generator run completed", "labels": { "sent_docs": 10240, "sent_bytes": 10813440, "elapsed_s": 28.4, "rate_kb_s": 372.1 } }
 ```
-
-## Authentication
-
-| Method | Flag |
-|---|---|
-| API key | `--api-key BASE64` |
-| Basic auth | `-u elastic -p changeme` |
-| Unauthenticated | _(omit both)_ |
-| Skip TLS verification | `--insecure` |
