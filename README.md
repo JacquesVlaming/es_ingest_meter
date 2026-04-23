@@ -149,29 +149,6 @@ Example events:
 { "message": "Generator run completed", "labels": { "sent_docs": 10240, "sent_bytes": 10813440, "elapsed_s": 28.4, "rate_kb_s": 372.1 } }
 ```
 
-## GCP VM (elastic-sa project)
-
-The VM `jacques-vlaming-ubuntu` (us-central1-c) runs the ingest scheduler. Elastic's Cloud Custodian automation will suspend and eventually delete VMs missing required labels.
-
-**Required labels** (must all be present to avoid suspension):
-
-```bash
-gcloud compute instances add-labels jacques-vlaming-ubuntu \
-  --project=elastic-sa \
-  --zone=us-central1-c \
-  --labels=division=field,org=sa,team=sa,project=jacquesvlaming
-```
-
-If the VM is already suspended, resume it after labeling:
-
-```bash
-gcloud compute instances resume jacques-vlaming-ubuntu \
-  --project=elastic-sa \
-  --zone=us-central1-c
-```
-
-For policy questions contact rnd-hosts-wg@elastic.co.
-
 ## Authentication
 
 | Method | Flag |
