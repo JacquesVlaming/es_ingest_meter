@@ -12,14 +12,20 @@ A toolset for accurately measuring daily data ingest volume on an Elasticsearch 
 
 ## How it works
 
-The meter reads `primaries.store.size_in_bytes` from the `_stats` API and groups indices by the date embedded in their name. It handles all common naming conventions:
+The meter reads `primaries.store.size_in_bytes` and `docs.count` from the `_stats` API to compute an average document size per index. It then runs a `date_histogram` aggregation on the timestamp field to get the actual document count per day, and multiplies by the average doc size to estimate daily storage — regardless of whether the index name contains a date.
 
-- `YYYY.MM.DD` / `YYYY-MM-DD` — Filebeat, ILM-rolled, Logstash
-- `YYYYMMDD`
-- `.ds-*` data stream backing indices
-- Monthly indices (`YYYY.MM`)
+For indices with no data in the timestamp field within the window (e.g. no `@timestamp` field), the meter falls back to spreading the index's total size evenly across days since its creation date.
 
-Indices outside the rolling window, or without a recognisable date, are excluded from averages. The current day's index will always show partial data.
+The current day will always show partial data.
+
+## Assumptions and requirements
+
+- **Timestamp field**: Indices must contain a date field for accurate per-day bucketing. Defaults to `@timestamp`. Override with `--timestamp-field`. Indices without this field fall back to creation-date spreading.
+- **`_stats` API access**: The credentials used must have `monitor` or `manage` privileges on the target indices.
+- **Aggregations enabled**: The timestamp field must be mapped as `date` type and not disabled for aggregations.
+- **Average doc size is uniform**: Storage per day is estimated as `avg_doc_size × docs_that_day`. If document size varies significantly over time, estimates may be skewed.
+- **Today's data is partial**: The current day's row reflects ingest so far, not a full day. Exclude today from averages when comparing full days.
+- **Replicas counted separately**: The `With Replicas` column includes all replica copies. The replica multiplier shown is observed from the cluster — adjust your sizing targets accordingly.
 
 ## Quickstart
 
@@ -78,6 +84,7 @@ cp .env.example .env
 | `BATCH_SIZE` | `500` | Documents per bulk request |
 | `INTERVAL_HOURS` | `24` | Hours between scheduler runs |
 | `KEEP_INDEX` | — | Set to `1` to retain test indices after each run |
+| `PARALLEL` | `1` | Number of concurrent bulk indexing threads |
 
 ### Run the meter (one-shot)
 
@@ -141,6 +148,29 @@ Example events:
 { "message": "Meter run completed", "labels": { "avg_primary_bytes_per_day": 1632428032, "avg_docs_per_day": 2670000, "projected_30d_primary_bytes": 48972840960 } }
 { "message": "Generator run completed", "labels": { "sent_docs": 10240, "sent_bytes": 10813440, "elapsed_s": 28.4, "rate_kb_s": 372.1 } }
 ```
+
+## GCP VM (elastic-sa project)
+
+The VM `jacques-vlaming-ubuntu` (us-central1-c) runs the ingest scheduler. Elastic's Cloud Custodian automation will suspend and eventually delete VMs missing required labels.
+
+**Required labels** (must all be present to avoid suspension):
+
+```bash
+gcloud compute instances add-labels jacques-vlaming-ubuntu \
+  --project=elastic-sa \
+  --zone=us-central1-c \
+  --labels=division=field,org=sa,team=sa,project=jacquesvlaming
+```
+
+If the VM is already suspended, resume it after labeling:
+
+```bash
+gcloud compute instances resume jacques-vlaming-ubuntu \
+  --project=elastic-sa \
+  --zone=us-central1-c
+```
+
+For policy questions contact rnd-hosts-wg@elastic.co.
 
 ## Authentication
 

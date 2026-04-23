@@ -4,8 +4,8 @@ metadata:
   name: es-ingest-config
   namespace: es-tools
 data:
-  TARGET_MB: "102400"  # 100 GB
+  TARGET_MB: "25600"  # 25 GB
   DOC_SIZE_KB: "1"
   BATCH_SIZE: "500"
   PARALLEL: "4"
-  KEEP_INDEX: ""    # set to "1" to retain test indices after each run
+  KEEP_INDEX: "1"   # set to "1" to retain test indices after each run

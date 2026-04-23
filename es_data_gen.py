@@ -29,6 +29,10 @@ except ImportError:
 
 import es_logger
 
+TEMPLATE_NAME    = "es-ingest-meter-indices"
+TEMPLATE_PATTERN = "es-ingest-meter-test-*"
+ILM_POLICY_NAME  = "ingest-meter-policy"
+
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -202,6 +206,72 @@ def human_bytes(n: float) -> str:
 
 
 # ---------------------------------------------------------------------------
+# ILM policy + Index template
+# ---------------------------------------------------------------------------
+
+def ensure_ilm_policy(client: ESClient) -> None:
+    """Create or update the ILM policy for test indices."""
+    body = {
+        "policy": {
+            "phases": {
+                "hot": {
+                    "actions": {}
+                },
+                "delete": {
+                    "min_age": "30d",
+                    "actions": {
+                        "delete": {}
+                    }
+                }
+            }
+        }
+    }
+    client.put(f"/_ilm/policy/{ILM_POLICY_NAME}", body)
+
+
+def ensure_index_template(client: ESClient) -> None:
+    """Create or update the composable index template for test indices."""
+    body = {
+        "index_patterns": [TEMPLATE_PATTERN],
+        "priority": 100,
+        "template": {
+            "settings": {
+                "number_of_shards": 1,
+                "number_of_replicas": 1,
+                "index.lifecycle.name": ILM_POLICY_NAME,
+            },
+            "mappings": {
+                "_size": {"enabled": True},
+                "dynamic": True,
+                "properties": {
+                    "@timestamp": {"type": "date"},
+                    "service":    {"type": "keyword"},
+                    "trace_id":   {"type": "keyword"},
+                    "log": {"properties": {
+                        "level":   {"type": "keyword"},
+                        "message": {"type": "text"},
+                    }},
+                    "http": {"properties": {
+                        "method":      {"type": "keyword"},
+                        "path":        {"type": "keyword"},
+                        "status_code": {"type": "integer"},
+                        "response_ms": {"type": "long"},
+                    }},
+                    "client": {"properties": {
+                        "ip":      {"type": "ip"},
+                        "user_id": {"type": "long"},
+                    }},
+                    "host": {"properties": {
+                        "name": {"type": "keyword"},
+                    }},
+                },
+            },
+        },
+    }
+    client.put(f"/_index_template/{TEMPLATE_NAME}", body)
+
+
+# ---------------------------------------------------------------------------
 # Main ingestion logic
 # ---------------------------------------------------------------------------
 
@@ -323,19 +393,23 @@ def main() -> None:
         "target_mb": args.target_mb if not args.docs else None,
     })
 
-    # Create index explicitly so we control mappings / shard count
-    try:
-        client.put(f"/{index}", {
-            "settings": {"number_of_shards": 1, "number_of_replicas": 1},
-            "mappings": {"dynamic": True},
-        })
-        print(f"Created index: {index}")
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 400 and "already_exists" in e.response.text:
-            print(f"Index already exists, appending: {index}")
-        else:
-            log.error("Failed to create index", extra={"index": index, "error": str(e)})
-            raise
+    # Ensure ILM policy and index template are in place before first bulk request
+    for label, fn in [
+        (f"ILM policy '{ILM_POLICY_NAME}'", ensure_ilm_policy),
+        (f"Index template '{TEMPLATE_NAME}' (pattern: {TEMPLATE_PATTERN})", ensure_index_template),
+    ]:
+        try:
+            fn(client)
+            print(f"{label} ready")
+        except requests.exceptions.HTTPError as e:
+            body = ""
+            try:
+                body = e.response.json()
+            except Exception:
+                body = e.response.text
+            log.warning(f"Could not apply {label} — continuing with cluster defaults",
+                        extra={"error": str(e), "response": body})
+            print(f"  Warning: {label} unavailable ({e.response.status_code}): {body}")
 
     # Ingest
     try:
