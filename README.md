@@ -85,9 +85,9 @@ The current day will always show partial data.
 - **Today's data is partial**: The current day's row reflects ingest so far, not a full day. Exclude today from averages when comparing full days.
 - **Replicas counted separately**: The `With Replicas` column includes all replica copies. The replica multiplier shown is observed from the cluster — adjust your sizing targets accordingly.
 
-## API key privileges
+## Privileges
 
-### Ingest meter
+### Option A — API key
 
 ```json
 POST /_security/api_key
@@ -106,6 +106,38 @@ POST /_security/api_key
   }
 }
 ```
+
+Set the returned `encoded` value as `ES_API_KEY` in `.env`.
+
+### Option B — Username and password
+
+**1. Create the role:**
+
+```json
+POST /_security/role/ingest_meter_reader
+{
+  "cluster": ["monitor", "read_ilm"],
+  "indices": [
+    {
+      "names": ["*"],
+      "privileges": ["monitor", "view_index_metadata", "read"]
+    }
+  ]
+}
+```
+
+**2. Create the user:**
+
+```json
+POST /_security/user/es_ingest_meter
+{
+  "password": "<your-password>",
+  "full_name": "ES Ingest Meter",
+  "roles": ["ingest_meter_reader"]
+}
+```
+
+Set `ES_USERNAME` and `ES_PASSWORD` in `.env`.
 
 ### ILM inventory
 
